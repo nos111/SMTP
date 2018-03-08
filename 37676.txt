@@ -1,0 +1,3 @@
+helo nour.com
+mail FROM:<nsaffour@gmail.com>
+rcpt TO:<nsaffour@gmail.com>
