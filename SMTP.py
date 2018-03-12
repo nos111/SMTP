@@ -1,6 +1,8 @@
 import socket
 import sys
 import dns.resolver
+import re
+
 
 state = {
   'HELO': False,
@@ -36,14 +38,21 @@ def MAIL(args, socket, client_address, state):
     if state['HELO'] == False:
       socket.send("503 5.5.1 Error: send HELO/EHLO first \n")
     else:
-      print "the mail state is ", state['MAIL']
       #make sure it's not a nested mail command
       if state['MAIL'] == False:
-        print >>sys.stderr, "got Mail command", args
-        with open(fileName, 'a') as the_file:
-          the_file.write(" ".join(args) + "\n")
-        state['MAIL'] = True
-        socket.send("250 2.1.0 Ok \n")
+        #check if the arguments are provided
+        if len(args) != 2:
+          socket.send("501 5.5.4 Syntax: MAIL FROM:<address> \n")
+          return
+        checkSyntax = re.match("FROM:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
+        if(checkSyntax):
+          print checkSyntax.group()
+          with open(fileName, 'a') as the_file:
+            the_file.write(" ".join(args) + "\n")
+          state['MAIL'] = True
+          socket.send("250 2.1.0 Ok \n")
+        else:
+          socket.send("501 5.1.7 Bad sender address syntax \n")
       else:
         socket.send("503 5.5.1 Error: nested MAIL command \n")
     
@@ -66,6 +75,8 @@ def DATA(args, socket, client_address, state):
     with open(fileName, 'a') as the_file:
       the_file.write("data \n")
       the_file.write(data + "\n")
+    state['MAIL'] = False
+    state['RCPT'] = False
     relayData(client_address)
   elif state['MAIL'] == True and state['RCPT'] == False:
     socket.send("554 5.5.1 Error: no valid recipients \n")
@@ -80,24 +91,28 @@ def relayData(client_address):
   filename = str(client_address[1]) + '.txt'
   HOST = 'alt1.gmail-smtp-in.l.google.com'    # The remote host
   PORT = 25              # The same port as used by the server
-  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-      s.connect((HOST, PORT))
-      with open(filename) as fp:
-        for line in fp:
-          s.sendall(line)
-          data = s.recv(1024)
-          print('Received', repr(data))
-      
-      
+  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  s.connect((HOST, PORT))
+  data = s.recv(1024)
+  print('Received', repr(data))
+  with open(filename) as fp:
+    for line in fp:
+      print('sent', repr(line))
+      s.sendall(line)
+      if line == ".\\n":
+        data = s.recv(1024)
+        print('Received', repr(data))
+
 
 def recieveData(socket):
     fragments = []
     while True: 
       line = linesplit(socket)
+      fragments.append(line)
       if line == ".\r":
         print "got here"
         return "".join(fragments)
-      fragments.append(line)
+      
     
 
 dispatch = {
@@ -165,8 +180,8 @@ while True:
 
 
 ''' helo nours.com
-MAIL FROM:<Yannregev@gmail.com>
-RCPT TO:<ilmari.kaskia@gmail.com>
+MAIL FROM:<nsaffour@gmail.com>
+RCPT TO:<nsaffour@gmail.com>
 DATA
 FROM: nsaffour@gmail.com
 SUBJECT: testing my smtp server

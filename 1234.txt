@@ -1,0 +1,8 @@
+helo nour.com
+MAIL FROM:<fahedibrahem13@gmail.com>
+RCPT TO:<alexander.t.said@gmail.com>
+data 
+FROM: alexander.t.said@gmail.com
+SUBJECT: testing my smtp server
+Hi it's me trying my server
+.
