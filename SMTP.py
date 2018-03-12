@@ -133,9 +133,9 @@ def relayData(client_address):
   data = s.recv(1024)
   print('Received', repr(data))
 
-state['recipient'] = "TO:<alexander.t.said@gmail.com>"
+#state['recipient'] = "TO:<alexander.t.said@gmail.com>"
 
-relayData((1, 1234))
+#relayData((1, 1234))
 
 def recieveData(socket):
     fragments = []
@@ -163,7 +163,11 @@ def process_network_command(command, args, socket, client_address):
     socket.send("502 5.5.2 Error: command not recognized \n")
 
 def linesplit(socket):
+    #add timeout to the connection if no commands are recieved
+    socket.settimeout(300)
     buffer = socket.recv(4096)
+    #remove timeout if commands are recieved
+    socket.settimeout(None)
     buffering = True
     while buffering:
         if "\n" in buffer:
@@ -178,7 +182,8 @@ def linesplit(socket):
 
 # Create a TCP/IP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+#prevent address is already in use error
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # Bind the socket to the port
 server_address = ('localhost', 50)
 print >>sys.stderr, 'starting up on %s port %s' % server_address
@@ -189,12 +194,12 @@ sock.listen(10)
 while state['loop']:
     # Wait for a connection
     print >>sys.stderr, 'waiting for a connection'
-    #print socket.getaddrinfo('gmail.com', 25)
     connection, client_address = sock.accept()
-    connection.send("220 SMTP Nour 1.0 \n")
+    
     try:
+        connection.send("220 SMTP Nour 1.0 \n")
         print >>sys.stderr, 'connection from', client_address
-        # Receive the data in small chunks and retransmit it
+        # Receive the data in small chunks 
         while state['loop']:
             lines = linesplit(connection)
             args = lines.split()
