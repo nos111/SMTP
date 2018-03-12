@@ -8,13 +8,16 @@ state = {
   'HELO': False,
   'MAIL': False,
   'RCPT': False,
+  'recipient': ""
 }
 
 #start a new file for this session and change the state of the HELO 
 def HELO(args, socket, client_address, state):
     fileName = str(client_address[1]) + '.txt'
     if state['HELO'] == False:
-      print "got HELO", args
+      if len(args) != 2:
+        socket.send("501 Syntax: HELO hostname")
+        return
       with open(fileName, 'a') as the_file:
         the_file.write(" ".join(args) + "\n")
       state['HELO'] = True
@@ -46,7 +49,6 @@ def MAIL(args, socket, client_address, state):
           return
         checkSyntax = re.match("FROM:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
         if(checkSyntax):
-          print checkSyntax.group()
           with open(fileName, 'a') as the_file:
             the_file.write(" ".join(args) + "\n")
           state['MAIL'] = True
@@ -58,12 +60,20 @@ def MAIL(args, socket, client_address, state):
     
 def RCPT(args, socket, client_address, state):
   if state['MAIL'] == True and state['HELO'] == True:
-    fileName = str(client_address[1]) + '.txt'
-    print >>sys.stderr, "got Mail command", args
-    with open(fileName, 'a') as the_file:
-      the_file.write(" ".join(args) + "\n")
-    state['RCPT'] = True
-    socket.send("250 2.1.5 Ok \n")
+    if len(args) != 2:
+      socket.send("501 5.5.4 Syntax: RCPT TO:<address>")
+      return
+    checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
+    if(checkSyntax):
+      state['recipient'] = checkSyntax.group()
+      fileName = str(client_address[1]) + '.txt'
+      print >>sys.stderr, "got Mail command", args
+      with open(fileName, 'a') as the_file:
+        the_file.write(" ".join(args) + "\n")
+      state['RCPT'] = True
+      socket.send("250 2.1.5 Ok \n")
+    else:
+      socket.send("501 5.1.3 Bad recipient address syntax \n")
   else:
     socket.send("503 5.5.1 Error: need MAIL command \n")
 
