@@ -8,20 +8,23 @@ state = {
   'HELO': False,
   'MAIL': False,
   'RCPT': False,
+  'loop': True,
   'recipient': ""
 }
 
 #start a new file for this session and change the state of the HELO 
 def HELO(args, socket, client_address, state):
     fileName = str(client_address[1]) + '.txt'
+    if len(args) != 2:
+      socket.send("501 Syntax: HELO hostname")
+      return
+    #check if helo has been sent before
     if state['HELO'] == False:
-      if len(args) != 2:
-        socket.send("501 Syntax: HELO hostname")
-        return
-      with open(fileName, 'a') as the_file:
+      with open(fileName, 'w') as the_file:
         the_file.write(" ".join(args) + "\n")
       state['HELO'] = True
       socket.send("250 "+ str(client_address[1]) + "OK \n")
+    #if helo sent before reset all state and delete old file
     else:
       open(fileName, 'w').close()
       with open(fileName, 'a') as the_file:
@@ -59,10 +62,12 @@ def MAIL(args, socket, client_address, state):
         socket.send("503 5.5.1 Error: nested MAIL command \n")
     
 def RCPT(args, socket, client_address, state):
+  #check if a mail transaction has begon and helo is initiatied
   if state['MAIL'] == True and state['HELO'] == True:
     if len(args) != 2:
       socket.send("501 5.5.4 Syntax: RCPT TO:<address>")
       return
+    #check the format of the email is valid
     checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
     if(checkSyntax):
       state['recipient'] = checkSyntax.group()
@@ -94,13 +99,26 @@ def DATA(args, socket, client_address, state):
     socket.send("503 5.5.1 Error: need RCPT command \n")
 
 def QUIT(args, socket, client_address, stat):
-  connection.close()
-  exit(1)
+  state['loop'] = False
+
+
 
 def relayData(client_address):
   filename = str(client_address[1]) + '.txt'
-  HOST = 'alt1.gmail-smtp-in.l.google.com'    # The remote host
-  PORT = 25              # The same port as used by the server
+  # The remote host
+  domain = re.search("@[\w.]+", state['recipient'])
+  domain = domain.group()
+  domain = domain[1:]
+  mailExchangeServers = dns.resolver.query(domain, 'MX')
+  lowestPref = ""
+  pref = mailExchangeServers[0].preference
+  for rdata in mailExchangeServers:
+    if rdata.preference <= pref:
+      lowestPref = rdata.exchange.__str__()
+  lowestPref = lowestPref[:-1]
+  print lowestPref
+  HOST = lowestPref
+  PORT = 25              # email port
   s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   s.connect((HOST, PORT))
   data = s.recv(1024)
@@ -112,7 +130,12 @@ def relayData(client_address):
       if line == ".\\n":
         data = s.recv(1024)
         print('Received', repr(data))
+  data = s.recv(1024)
+  print('Received', repr(data))
 
+state['recipient'] = "TO:<alexander.t.said@gmail.com>"
+
+relayData((1, 1234))
 
 def recieveData(socket):
     fragments = []
@@ -163,23 +186,16 @@ sock.bind(server_address)
 # Listen for incoming connections
 sock.listen(10)
 
-while True:
+while state['loop']:
     # Wait for a connection
     print >>sys.stderr, 'waiting for a connection'
-    
-
-    answers = dns.resolver.query('gmail.com', 'MX')
-    for rdata in answers:
-      print 'Host', rdata.exchange, 'has preference', rdata.preference
-        #print socket.getaddrinfo('gmail.com', 25)
+    #print socket.getaddrinfo('gmail.com', 25)
     connection, client_address = sock.accept()
     connection.send("220 SMTP Nour 1.0 \n")
-
     try:
         print >>sys.stderr, 'connection from', client_address
-
         # Receive the data in small chunks and retransmit it
-        while True:
+        while state['loop']:
             lines = linesplit(connection)
             args = lines.split()
             print >>sys.stderr, 'the data is ', lines.split()
