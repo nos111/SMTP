@@ -16,7 +16,7 @@ state = {
 def HELO(args, socket, client_address, state):
     fileName = str(client_address[1]) + '.txt'
     if len(args) != 2:
-      socket.send("501 Syntax: HELO hostname")
+      socket.send("501 Syntax: HELO hostname \n")
       return
     #check if helo has been sent before
     if state['HELO'] == False:
@@ -32,8 +32,7 @@ def HELO(args, socket, client_address, state):
       state['HELO'] = False
       state['MAIL'] = False
       state['RCPT'] = False
-      print "the helo state is ", state['HELO']
-      print "the mail state is ", state['MAIL']
+
       state['HELO'] = True
       socket.send("250 "+ str(client_address[1]) + " OK \n")
 
@@ -65,7 +64,7 @@ def RCPT(args, socket, client_address, state):
   #check if a mail transaction has begon and helo is initiatied
   if state['MAIL'] == True and state['HELO'] == True:
     if len(args) != 2:
-      socket.send("501 5.5.4 Syntax: RCPT TO:<address>")
+      socket.send("501 5.5.4 Syntax: RCPT TO:<address> \n")
       return
     #check the format of the email is valid
     checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
@@ -92,15 +91,30 @@ def DATA(args, socket, client_address, state):
       the_file.write(data + "\n")
     state['MAIL'] = False
     state['RCPT'] = False
+    socket.send("Qued \n")
     relayData(client_address)
   elif state['MAIL'] == True and state['RCPT'] == False:
     socket.send("554 5.5.1 Error: no valid recipients \n")
   else:
     socket.send("503 5.5.1 Error: need RCPT command \n")
 
-def QUIT(args, socket, client_address, stat):
+def QUIT(args, socket, client_address, state):
   state['loop'] = False
+  socket.send("221 2.0.0 Bye \n")
 
+def VRFY(args, socket, client_address, state):
+  socket.send("252  Cannot VRFY user \n")
+
+def RSET(args, socket, client_address, state):
+  fileName = str(client_address[1]) + '.txt'
+  with open(fileName) as f:
+    first_line = f.readline()
+  open(fileName, 'w').close()
+  with open(fileName, 'a') as the_file:
+    the_file.write(first_line)
+  state['MAIL'] = False
+  state['RCPT'] = False
+  socket.send("250 OK \n")
 
 
 def relayData(client_address):
@@ -133,10 +147,6 @@ def relayData(client_address):
   data = s.recv(1024)
   print('Received', repr(data))
 
-#state['recipient'] = "TO:<alexander.t.said@gmail.com>"
-
-#relayData((1, 1234))
-
 def recieveData(socket):
     fragments = []
     while True: 
@@ -145,15 +155,15 @@ def recieveData(socket):
       if line == ".\r":
         print "got here"
         return "".join(fragments)
-      
-    
 
 dispatch = {
     'helo': HELO,
     'mail': MAIL,
     'rcpt': RCPT,
     'data': DATA,
-    'quit':QUIT
+    'quit':QUIT,
+    'vrfy': VRFY,
+    'rest': RSET
 }
 def process_network_command(command, args, socket, client_address):
   command = command.lower()
@@ -185,7 +195,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #prevent address is already in use error
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # Bind the socket to the port
-server_address = ('localhost', 50)
+server_address = ('145.108.228.39', 2000)
 print >>sys.stderr, 'starting up on %s port %s' % server_address
 sock.bind(server_address)
 # Listen for incoming connections
