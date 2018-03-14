@@ -6,16 +6,7 @@ import re
 import thread
 
 
-state = {
-  'HELO': False,
-  'MAIL': False,
-  'RCPT': False,
-  'loop': True,
-  'data': False,
-  'recipient': "",
-  'file':0,
-  'domain': ""
-}
+
 
 #start a new file for this session and change the state of the HELO 
 def HELO(args, socket, client_address, state):
@@ -108,11 +99,12 @@ def DATA(args, socket, client_address, state):
     with open(fileName, 'a') as the_file:
       the_file.write("data \n")
       the_file.write(data + "\n")
+      the_file.write("quit \n")
     state['MAIL'] = False
     state['RCPT'] = False
-    socket.send("Qeued \n")
+    socket.send("Qeued " + str(state['file']) + " \n")
     state['data'] = True
-    thread.start_new_thread(relayData,(state['file'],))
+    thread.start_new_thread(relayData,(state['file'], state))
   elif state['MAIL'] == True and state['RCPT'] == False:
     socket.send("554 5.5.1 Error: no valid recipients \n")
   else:
@@ -121,12 +113,13 @@ def DATA(args, socket, client_address, state):
 def QUIT(args, socket, client_address, state):
   state['loop'] = False
   socket.send("221 2.0.0 Bye \n")
+  socket.close()
 
 def VRFY(args, socket, client_address, state):
   socket.send("252  Cannot VRFY user \n")
 
 def RSET(args, socket, client_address, state):
-  fileName = str(client_address[1]) + '.txt'
+  fileName = str(state['file'] + '.txt')
   with open(fileName) as f:
     first_line = f.readline()
   open(fileName, 'w').close()
@@ -137,7 +130,7 @@ def RSET(args, socket, client_address, state):
   socket.send("250 OK \n")
 
 
-def relayData(client_address):
+def relayData(client_address, state):
   filename = str(client_address) + '.txt'
   # The remote host
   domain = re.search("@[\w.]+", state['recipient'])
@@ -189,7 +182,7 @@ dispatch = {
     'vrfy': VRFY,
     'rest': RSET
 }
-def process_network_command(command, args, socket, client_address):
+def process_network_command(command, args, socket, client_address, state):
   command = command.lower()
   try:
     dispatch[command](args, socket, client_address, state)
@@ -214,6 +207,30 @@ def linesplit(socket):
             else:
                 buffer += more
 
+def handleClient(socket, client_address):
+  state = {
+  'HELO': False,
+  'MAIL': False,
+  'RCPT': False,
+  'loop': True,
+  'data': False,
+  'recipient': "",
+  'file':0,
+  'domain': ""
+  }
+  try:
+    connection.send("220 SMTP Nour 1.0 \n")
+    print >>sys.stderr, 'connection from', client_address
+    # Receive the data in small chunks 
+    while state['loop']:
+        lines = linesplit(connection)
+        args = lines.split()
+        print >>sys.stderr, 'the data is ', lines.split()
+        process_network_command(args[0], args, connection, client_address, state)
+  finally:
+      # Clean up the connection
+      connection.close()
+
 # Create a TCP/IP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #prevent address is already in use error
@@ -225,23 +242,12 @@ sock.bind(server_address)
 # Listen for incoming connections
 sock.listen(10)
 
-while state['loop']:
+while True:
     # Wait for a connection
     print >>sys.stderr, 'waiting for a connection'
     connection, client_address = sock.accept()
-    
-    try:
-        connection.send("220 SMTP Nour 1.0 \n")
-        print >>sys.stderr, 'connection from', client_address
-        # Receive the data in small chunks 
-        while state['loop']:
-            lines = linesplit(connection)
-            args = lines.split()
-            print >>sys.stderr, 'the data is ', lines.split()
-            process_network_command(args[0], args, connection, client_address)
-    finally:
-        # Clean up the connection
-        connection.close()
+    if connection:
+      thread.start_new_thread(handleClient, (connection,client_address))
 
 
 ''' helo nours.com
