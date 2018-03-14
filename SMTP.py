@@ -1,7 +1,9 @@
 import socket
+import os
 import sys
 import dns.resolver
 import re
+import thread
 
 
 state = {
@@ -9,7 +11,10 @@ state = {
   'MAIL': False,
   'RCPT': False,
   'loop': True,
-  'recipient': ""
+  'data': False,
+  'recipient': "",
+  'file':0,
+  'domain': ""
 }
 
 #start a new file for this session and change the state of the HELO 
@@ -23,6 +28,8 @@ def HELO(args, socket, client_address, state):
       with open(fileName, 'w') as the_file:
         the_file.write(" ".join(args) + "\n")
       state['HELO'] = True
+      state['file'] = client_address[1]
+      state['domain'] = args[1]
       socket.send("250 "+ str(client_address[1]) + "OK \n")
     #if helo sent before reset all state and delete old file
     else:
@@ -38,7 +45,7 @@ def HELO(args, socket, client_address, state):
 
 #start the mail transaction after checking the sessions has be inititalized
 def MAIL(args, socket, client_address, state):
-    fileName = str(client_address[1]) + '.txt'
+    fileName = str(state['file']) + '.txt'
     #first check that helo has been sent
     if state['HELO'] == False:
       socket.send("503 5.5.1 Error: send HELO/EHLO first \n")
@@ -51,10 +58,22 @@ def MAIL(args, socket, client_address, state):
           return
         checkSyntax = re.match("FROM:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
         if(checkSyntax):
-          with open(fileName, 'a') as the_file:
-            the_file.write(" ".join(args) + "\n")
-          state['MAIL'] = True
-          socket.send("250 2.1.0 Ok \n")
+          #check if this is the first mail transaction in this session
+          if state['data'] == False:
+            with open(fileName, 'a') as the_file:
+              the_file.write(" ".join(args) + "\n")
+            state['MAIL'] = True
+            socket.send("250 2.1.0 Ok \n")
+          else:
+              state['file'] = state['file'] + 1
+              fileName = str(state['file']) + '.txt'
+              with open(fileName, 'a') as the_file:
+                the_file.write("helo " + state['domain'] + "\n")
+                the_file.write(" ".join(args) + "\n")
+              state['MAIL'] = True
+              socket.send("250 2.1.0 Ok \n")
+
+
         else:
           socket.send("501 5.1.7 Bad sender address syntax \n")
       else:
@@ -70,7 +89,7 @@ def RCPT(args, socket, client_address, state):
     checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
     if(checkSyntax):
       state['recipient'] = checkSyntax.group()
-      fileName = str(client_address[1]) + '.txt'
+      fileName = str(state['file']) + '.txt'
       print >>sys.stderr, "got Mail command", args
       with open(fileName, 'a') as the_file:
         the_file.write(" ".join(args) + "\n")
@@ -82,7 +101,7 @@ def RCPT(args, socket, client_address, state):
     socket.send("503 5.5.1 Error: need MAIL command \n")
 
 def DATA(args, socket, client_address, state):
-  fileName = str(client_address[1]) + '.txt'
+  fileName = str(state['file']) + '.txt'
   if state['MAIL'] == True and state['HELO'] == True and state['RCPT'] == True:
     socket.send("354 End data with <CR><LF>.<CR><LF> \n")
     data = recieveData(socket)
@@ -91,8 +110,9 @@ def DATA(args, socket, client_address, state):
       the_file.write(data + "\n")
     state['MAIL'] = False
     state['RCPT'] = False
-    socket.send("Qued \n")
-    relayData(client_address)
+    socket.send("Qeued \n")
+    state['data'] = True
+    thread.start_new_thread(relayData,(state['file'],))
   elif state['MAIL'] == True and state['RCPT'] == False:
     socket.send("554 5.5.1 Error: no valid recipients \n")
   else:
@@ -118,7 +138,7 @@ def RSET(args, socket, client_address, state):
 
 
 def relayData(client_address):
-  filename = str(client_address[1]) + '.txt'
+  filename = str(client_address) + '.txt'
   # The remote host
   domain = re.search("@[\w.]+", state['recipient'])
   domain = domain.group()
@@ -144,16 +164,20 @@ def relayData(client_address):
       if line == ".\\n":
         data = s.recv(1024)
         print('Received', repr(data))
+  os.remove(filename)
   data = s.recv(1024)
   print('Received', repr(data))
+
+#state['recipient'] = "FROM:<nsaffour@gmail.com>"
+#relayData(33345)
 
 def recieveData(socket):
     fragments = []
     while True: 
       line = linesplit(socket)
+      line = line + '\n'
       fragments.append(line)
-      if line == ".\r":
-        print "got here"
+      if line == ".\r\n":
         return "".join(fragments)
 
 dispatch = {
@@ -195,7 +219,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #prevent address is already in use error
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # Bind the socket to the port
-server_address = ('145.108.228.39', 2000)
+server_address = ('192.168.43.112', 25)
 print >>sys.stderr, 'starting up on %s port %s' % server_address
 sock.bind(server_address)
 # Listen for incoming connections
