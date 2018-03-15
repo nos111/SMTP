@@ -4,6 +4,7 @@ import sys
 import dns.resolver
 import re
 import thread
+import threading
 
 
 
@@ -239,10 +240,14 @@ def handleClient(s, client_address):
     print >>sys.stderr, 'connection from', client_address
     # Receive the data in small chunks 
     while state['loop']:
-        lines = linesplit(connection)
+        lines = linesplit(s)
         args = lines.split()
         print >>sys.stderr, 'the data is ', lines.split()
-        process_network_command(args[0], args, connection, client_address, state)
+        #if lines:
+        #  lock = threading.Lock()
+        #  lock.acquire()
+        process_network_command(args[0], args, s, client_address, state)
+        #  lock.release()
   finally:
       # Clean up the connection
       s.close()
@@ -252,11 +257,11 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #prevent address is already in use error
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # Bind the socket to the port
-server_address = ('192.168.43.112', 25)
+server_address = ('localhost', 25)
 print >>sys.stderr, 'starting up on %s port %s' % server_address
 sock.bind(server_address)
 # Listen for incoming connections
-sock.listen(10)
+sock.listen(0)
 
 while True:
     # Wait for a connection
