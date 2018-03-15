@@ -113,8 +113,17 @@ def QUIT(args, s, client_address, state):
   s.send("221 2.0.0 Bye \n")
   s.close()
 
+#To avoid pishing and brute force discovery of emails this function is not implemented
 def VRFY(args, s, client_address, state):
-  s.send("252  Cannot VRFY user \n")
+  if len(args) != 2:
+    s.send("501 5.5.4 Syntax: VRFY address \n")
+    return
+  checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
+  if(checkSyntax):
+    s.send("252  Cannot VRFY user \n")
+  else:
+    s.send("450 4.1.2 Recipient address rejected: Domain not found \n")
+  
 
 def RSET(args, s, client_address, state):
   fileName = str(state['file'] + '.txt')
@@ -134,7 +143,7 @@ def findMXServer(email):
   try:
     mailExchangeServers = dns.resolver.query(domain, 'MX')
   except:
-    print "no answer \n"
+    print "no domain found \n"
     return
   lowestPref = ""
   pref = mailExchangeServers[0].preference
