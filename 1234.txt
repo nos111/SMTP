@@ -1,8 +1,0 @@
-helo nour.com
-MAIL FROM:<nsaffour@gmail.com>
-RCPT TO:<nsaffour@gmail.com>
-data 
-FROM: nsaffour@gmail.com
-SUBJECT: testing my smtp server
-Hi it's me trying my server
-.

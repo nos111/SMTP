@@ -1,6 +1,0 @@
-helo nour
-mail from:<ns@gmai.com>
-rcpt to:<sd@gma.com>
-data 
-hellothis is megoing up and down.
-mail from:<nsaffour@gmail.com>

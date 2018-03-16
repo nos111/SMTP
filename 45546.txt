@@ -1,3 +1,0 @@
-helo nour
-mail from:<ns@gmail.com>
-rcpt to:<ns@g.com>

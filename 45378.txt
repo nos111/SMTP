@@ -1,3 +1,0 @@
-helo Nour
-mail from:<nsaffour@gmail.com>
-RCPT

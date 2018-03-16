@@ -31,7 +31,7 @@ def HELO(args, s, client_address, state):
       state['HELO'] = False
       state['MAIL'] = False
       state['RCPT'] = False
-
+      state['completedTransaction'] = False
       state['HELO'] = True
       s.send("250 "+ str(client_address[1]) + " OK \n")
 
@@ -48,7 +48,7 @@ def MAIL(args, s, client_address, state):
         if len(args) != 2:
           s.send("501 5.5.4 Syntax: MAIL FROM:<address> \n")
           return
-        checkSyntax = re.match("FROM:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
+        checkSyntax = re.match("(^FROM:<[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+>$)", args[1], re.IGNORECASE)
         if(checkSyntax):
           #check if this is the first mail transaction in this session
           if state['data'] == False:
@@ -63,6 +63,7 @@ def MAIL(args, s, client_address, state):
                 the_file.write("helo " + state['domain'] + "\n")
                 the_file.write(" ".join(args) + "\n")
               state['MAIL'] = True
+              state['completedTransaction'] = False
               s.send("250 2.1.0 Ok \n")
         else:
           s.send("501 5.1.7 Bad sender address syntax \n")
@@ -76,7 +77,7 @@ def RCPT(args, s, client_address, state):
       s.send("501 5.5.4 Syntax: RCPT TO:<address> \n")
       return
     #check the format of the email is valid
-    checkSyntax = re.match("TO:<\w+@\w+\.\w+>", args[1], re.IGNORECASE)
+    checkSyntax = re.match("(^TO:<[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+>$)", args[1], re.IGNORECASE)
     if(checkSyntax):
       state['recipient'] = checkSyntax.group()
       fileName = str(state['file']) + '.txt'
@@ -103,6 +104,7 @@ def DATA(args, s, client_address, state):
     state['RCPT'] = False
     s.send("Qeued " + str(state['file']) + " \n")
     state['data'] = True
+    state['completedTransaction'] = True
     thread.start_new_thread(relayData,(state['file'], state))
   elif state['MAIL'] == True and state['RCPT'] == False:
     s.send("554 5.5.1 Error: no valid recipients \n")
@@ -113,6 +115,10 @@ def QUIT(args, s, client_address, state):
   state['loop'] = False
   s.send("221 2.0.0 Bye \n")
   s.close()
+  if state['completedTransaction'] == False:
+    fileName = str(state['file']) + '.txt'
+    os.remove(fileName)
+
 
 #To avoid pishing and brute force discovery of emails this function is not implemented
 def VRFY(args, s, client_address, state):
@@ -181,6 +187,13 @@ def relayData(client_address, state):
 #state['recipient'] = "FROM:<nsaffour@gmail.com>"
 #relayData(33345)
 
+def closeAndClean(s, state):
+  state['loop'] = False
+  s.close()
+  if state['completedTransaction'] == False:
+    fileName = str(state['file']) + '.txt'
+    os.remove(fileName)
+
 def recieveData(s):
     fragments = []
     while True: 
@@ -206,9 +219,10 @@ def process_network_command(command, args, s, client_address, state):
   except KeyError:
     s.send("502 5.5.2 Error: command not recognized \n")
 
-def linesplit(s):
+def linesplit(s, state):
+  try:
     #add timeout to the connection if no commands are recieved
-    s.settimeout(300)
+    s.settimeout(10)
     buffer = s.recv(4096)
     #remove timeout if commands are recieved
     s.settimeout(None)
@@ -223,6 +237,9 @@ def linesplit(s):
                 buffering = False
             else:
                 buffer += more
+  except socket.timeout:
+    closeAndClean(s, state)
+  
 
 def handleClient(s, client_address):
   state = {
@@ -233,21 +250,19 @@ def handleClient(s, client_address):
   'data': False,
   'recipient': "",
   'file':0,
-  'domain': ""
+  'domain': "",
+  'completedTransaction': False
   }
   try:
     s.send("220 SMTP Nour 1.0 \n")
     print >>sys.stderr, 'connection from', client_address
     # Receive the data in small chunks 
     while state['loop']:
-        lines = linesplit(s)
-        args = lines.split()
-        print >>sys.stderr, 'the data is ', lines.split()
-        #if lines:
-        #  lock = threading.Lock()
-        #  lock.acquire()
-        process_network_command(args[0], args, s, client_address, state)
-        #  lock.release()
+        lines = linesplit(s, state)
+        if lines:
+          args = lines.split()
+          print >>sys.stderr, 'the data is ', lines.split()
+          process_network_command(args[0], args, s, client_address, state)
   finally:
       # Clean up the connection
       s.close()
