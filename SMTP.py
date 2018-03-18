@@ -6,9 +6,6 @@ import re
 import thread
 import threading
 
-
-
-
 #start a new file for this session and change the state of the HELO 
 def HELO(args, s, client_address, state):
     fileName = str(client_address[1]) + '.txt'
@@ -22,7 +19,7 @@ def HELO(args, s, client_address, state):
       state['HELO'] = True
       state['file'] = client_address[1]
       state['domain'] = args[1]
-      s.send("250 "+ str(client_address[1]) + "OK \n")
+      s.send("250 "+ str(client_address[1]) + " OK \n")
     #if helo sent before reset all state and delete old file
     else:
       open(fileName, 'w').close()
@@ -95,7 +92,7 @@ def DATA(args, s, client_address, state):
   fileName = str(state['file']) + '.txt'
   if state['MAIL'] == True and state['HELO'] == True and state['RCPT'] == True:
     s.send("354 End data with <CR><LF>.<CR><LF> \n")
-    data = recieveData(s)
+    data = recieveData(s, state)
     with open(fileName, 'a') as the_file:
       the_file.write("data \n")
       the_file.write(data + "\n")
@@ -110,6 +107,9 @@ def DATA(args, s, client_address, state):
     s.send("554 5.5.1 Error: no valid recipients \n")
   else:
     s.send("503 5.5.1 Error: need RCPT command \n")
+
+def NOOP(args, s, client_address, state):
+  s.send("250 Ok \n")
 
 def QUIT(args, s, client_address, state):
   state['loop'] = False
@@ -143,6 +143,7 @@ def RSET(args, s, client_address, state):
   state['RCPT'] = False
   s.send("250 OK \n")
 
+
 def findMXServer(email):
   domain = re.search("@[\w.]+", email)
   domain = domain.group()
@@ -164,7 +165,7 @@ def relayData(client_address, state):
   filename = str(client_address) + '.txt'
   # The remote host
   HOST = findMXServer(state['recipient'])
-  print "the host is ", HOST
+  #if we got results for the host mx server
   if HOST:
     PORT = 25              # email port
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -184,9 +185,7 @@ def relayData(client_address, state):
   else:
     print "Host not found \n"
 
-#state['recipient'] = "FROM:<nsaffour@gmail.com>"
-#relayData(33345)
-
+#end the loop of handling a client and delete the commands file
 def closeAndClean(s, state):
   state['loop'] = False
   s.close()
@@ -194,10 +193,11 @@ def closeAndClean(s, state):
     fileName = str(state['file']) + '.txt'
     os.remove(fileName)
 
-def recieveData(s):
+#keep on recieving data until you find a dot on a new line
+def recieveData(s, state):
     fragments = []
     while True: 
-      line = linesplit(s)
+      line = linesplit(s, state)
       line = line + '\n'
       fragments.append(line)
       if line == ".\r\n":
@@ -208,10 +208,13 @@ dispatch = {
     'mail': MAIL,
     'rcpt': RCPT,
     'data': DATA,
-    'quit':QUIT,
+    'quit': QUIT,
     'vrfy': VRFY,
-    'rest': RSET
+    'rest': RSET,
+    'noop': NOOP
 }
+
+#processes all the commands recieved from the SMTP client
 def process_network_command(command, args, s, client_address, state):
   command = command.lower()
   try:
@@ -219,28 +222,34 @@ def process_network_command(command, args, s, client_address, state):
   except KeyError:
     s.send("502 5.5.2 Error: command not recognized \n")
 
+#recieve a line
 def linesplit(s, state):
   try:
     #add timeout to the connection if no commands are recieved
-    s.settimeout(10)
+    s.settimeout(300)
     buffer = s.recv(4096)
     #remove timeout if commands are recieved
     s.settimeout(None)
     buffering = True
     while buffering:
-        if "\n" in buffer:
-            (line, buffer) = buffer.split("\n", 1)
-            return line
-        else:
-            more = s.recv(4096)
-            if not more:
-                buffering = False
-            else:
-                buffer += more
+      #prevent empty lines from being processed
+      if buffer == "\r\n":
+        s.send("500 5.5.2 Error: bad syntax \n")
+      if "\n" in buffer:
+          (line, buffer) = buffer.split("\n", 1)
+          return line
+      else:
+          more = s.recv(4096)
+          if not more:
+              buffering = False
+          else:
+              buffer += more
   except socket.timeout:
     closeAndClean(s, state)
   
 
+#take care of the sessions of one client with all of it's transactions
+#each call to this function is handled in a seperate section
 def handleClient(s, client_address):
   state = {
   'HELO': False,
@@ -259,32 +268,39 @@ def handleClient(s, client_address):
     # Receive the data in small chunks 
     while state['loop']:
         lines = linesplit(s, state)
-        if lines:
-          args = lines.split()
-          print >>sys.stderr, 'the data is ', lines.split()
+        args = lines.split()
+        print >>sys.stderr, 'the data is ', lines.split()
+        #prevent empty lines from invoking the function
+        if len(args) > 0:
           process_network_command(args[0], args, s, client_address, state)
   finally:
       # Clean up the connection
       s.close()
 
-# Create a TCP/IP socket
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#prevent address is already in use error
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-# Bind the socket to the port
-server_address = ('localhost', 25)
-print >>sys.stderr, 'starting up on %s port %s' % server_address
-sock.bind(server_address)
-# Listen for incoming connections
-sock.listen(0)
 
-while True:
-    # Wait for a connection
-    print >>sys.stderr, 'waiting for a connection'
-    connection, client_address = sock.accept()
-    if connection:
-      thread.start_new_thread(handleClient, (connection,client_address))
+def main():
+  print(sys.argv)
+  # Create a TCP/IP socket
+  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  #prevent address is already in use error
+  sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+  # Bind the socket to the port
+  server_address = (sys.argv[1], 25)
+  print >>sys.stderr, 'starting up on %s port %s' % server_address
+  sock.bind(server_address)
+  # Listen for incoming connections
+  sock.listen(0)
 
+  while True:
+      # Wait for a connection
+      print >>sys.stderr, 'waiting for a connection'
+      connection, client_address = sock.accept()
+      if connection:
+        thread.start_new_thread(handleClient, (connection,client_address))
+
+
+if __name__== "__main__":
+  main()
 
 ''' helo nours.com
 MAIL FROM:<nsaffour@gmail.com>
