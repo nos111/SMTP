@@ -90,16 +90,17 @@ def RCPT(args, s, client_address, state):
 
 def DATA(args, s, client_address, state):
   fileName = str(state['file']) + '.txt'
+  print state['MAIL'], state['HELO'], state['RCPT']
   if state['MAIL'] == True and state['HELO'] == True and state['RCPT'] == True:
     s.send("354 End data with <CR><LF>.<CR><LF> \n")
     data = recieveData(s, state)
     with open(fileName, 'a') as the_file:
       the_file.write("data \n")
-      the_file.write(data + "\n")
+      the_file.write(data)
       the_file.write("quit \n")
     state['MAIL'] = False
     state['RCPT'] = False
-    s.send("Qeued " + str(state['file']) + " \n")
+    s.send("250 queued " + str(state['file']) + " \n")
     state['data'] = True
     state['completedTransaction'] = True
     thread.start_new_thread(relayData,(state['file'], state))
@@ -195,13 +196,20 @@ def closeAndClean(s, state):
 
 #keep on recieving data until you find a dot on a new line
 def recieveData(s, state):
-    fragments = []
-    while True: 
-      line = linesplit(s, state)
-      line = line + '\n'
-      fragments.append(line)
-      if line == ".\r\n":
-        return "".join(fragments)
+    bufferSize = 4096
+    buffer = s.recv(bufferSize)
+    #remove timeout if commands are recieved
+    buffering = True
+    while buffering:
+      if "\r\n.\r\n" in buffer:
+          return buffer
+      else:
+          more = s.recv(4096)
+          if not more:
+              buffering = False
+          else:
+              buffer += more
+    return buffer
 
 dispatch = {
     'helo': HELO,
@@ -228,6 +236,7 @@ def linesplit(s, state):
     #add timeout to the connection if no commands are recieved
     s.settimeout(300)
     buffer = s.recv(4096)
+    print buffer
     #remove timeout if commands are recieved
     s.settimeout(None)
     buffering = True
@@ -268,6 +277,7 @@ def handleClient(s, client_address):
     # Receive the data in small chunks 
     while state['loop']:
         lines = linesplit(s, state)
+        print lines
         args = lines.split()
         print >>sys.stderr, 'the data is ', lines.split()
         #prevent empty lines from invoking the function
