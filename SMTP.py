@@ -5,6 +5,7 @@ import dns.resolver
 import re
 import thread
 import threading
+import shutil
 
 #start a new file for this session and change the state of the HELO 
 def HELO(args, s, client_address, state):
@@ -78,7 +79,6 @@ def RCPT(args, s, client_address, state):
     if(checkSyntax):
       state['recipient'] = checkSyntax.group()
       fileName = str(state['file']) + '.txt'
-      print >>sys.stderr, "got Mail command", args
       with open(fileName, 'a') as the_file:
         the_file.write(" ".join(args) + "\n")
       state['RCPT'] = True
@@ -90,7 +90,6 @@ def RCPT(args, s, client_address, state):
 
 def DATA(args, s, client_address, state):
   fileName = str(state['file']) + '.txt'
-  print state['MAIL'], state['HELO'], state['RCPT']
   if state['MAIL'] == True and state['HELO'] == True and state['RCPT'] == True:
     s.send("354 End data with <CR><LF>.<CR><LF> \n")
     data = recieveData(s, state)
@@ -177,14 +176,22 @@ def relayData(client_address, state):
       for line in fp:
         print('sent', repr(line))
         s.sendall(line)
-        if line == ".\\n":
+        if line == ".\r\n":
           data = s.recv(1024)
           print('Received', repr(data))
+          answer = data.split(" ")
+          #check if the relaying successed, if it didn't write the session to the errors folder
+          if answer[0] != "250":
+            filePath = os.path.realpath(filename)
+            folderPath = os.path.join('errors', os.path.basename(filePath))
+            shutil.copy(filename, folderPath)
     os.remove(filename)
-    data = s.recv(1024)
-    print('Received', repr(data))
   else:
     print "Host not found \n"
+    #write the session to the errors folder
+    filePath = os.path.realpath(filename)
+    folderPath = os.path.join('errors', os.path.basename(filePath))
+    shutil.copy(filename, folderPath)
 
 #end the loop of handling a client and delete the commands file
 def closeAndClean(s, state):
@@ -277,9 +284,7 @@ def handleClient(s, client_address):
     # Receive the data in small chunks 
     while state['loop']:
         lines = linesplit(s, state)
-        print lines
         args = lines.split()
-        print >>sys.stderr, 'the data is ', lines.split()
         #prevent empty lines from invoking the function
         if len(args) > 0:
           process_network_command(args[0], args, s, client_address, state)
